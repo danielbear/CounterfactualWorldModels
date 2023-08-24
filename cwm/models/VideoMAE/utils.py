@@ -244,8 +244,6 @@ class ImagePatchEmbed(nn.Module):
         x = self.proj(x).flatten(2).transpose(1, 2) # [B, num_patches, embed_dim]
         return x
         
-            
-        
 # sin-cos position encoding
 # https://github.com/jadore801120/attention-is-all-you-need-pytorch/blob/master/transformer/Models.py#L31
 def get_sinusoid_encoding_table(positions,

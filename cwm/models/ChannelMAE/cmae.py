@@ -200,7 +200,7 @@ class ChannelMaeEncoder(ChannelMaeDecoder):
 
     @property
     def num_base_channels(self):
-        return sum(self.concat_base_channels)
+        return len(self.concat_base_channels)
 
     @property
     def num_channel_groups(self):

@@ -14,11 +14,11 @@ class ChannelGroups:
 
     Attributes:
         mask_ratio: the proportion of patches/tokens to be masked, in [0, 1]
-        num_channels: the number of channels masked at this ratio
+        num_groups: the number of channel groups masked at this ratio
     """
 
     mask_ratio: float
-    num_groups: float = 1
+    num_groups: int = 1
 
     def __post_init__(self) -> None:
         self._validate()

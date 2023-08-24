@@ -317,11 +317,14 @@ class ChannelMae(nn.Module):
         enc_block_kwargs = self.encoder_params.get('block_kwargs', {})
         dec_block_kwargs = self.decoder_params.get('block_kwargs', {})
         enc_block_kwargs.update({'flash_attention': use_flash_attention})
-        dec_block_kwargs.update({'flash_attention': use_flash_attention})        
+        dec_block_kwargs.update({'flash_attention': use_flash_attention})
+        self.encoder_params['block_kwargs'] = enc_block_kwargs
+        self.decoder_params['block_kwargs'] = dec_block_kwargs
 
         if self.head_params is not None:
             head_block_kwargs = self.head_params.get('block_kwargs', {})
             head_block_kwargs.update({'flash_attention': use_flash_attention})
+            self.head_params['block_kwargs'] = block_kwargs
 
 
         self.encoder = self._build_encoder(params=self.encoder_params)

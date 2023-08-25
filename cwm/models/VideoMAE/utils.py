@@ -68,9 +68,11 @@ class Attention(nn.Module):
 
         self.flash_attention = flash_attention
 
+        self.attn_drop_rate = attn_drop                    
         if self.flash_attention:
-            from flash_attn.flash_attention import FlashAttention
-            self.fa = FlashAttention(softmax_scale=1, attention_dropout=attn_drop)
+            from flash_attn import flash_attn_qkvpacked_func
+            self.fa = lambda qkv: flash_attn_qkvpacked_func(
+                qkv, dropout_p=self.attn_drop_rate, softmax_scale=1)
 
         self.qkv = nn.Linear(dim, all_head_dim * 3, bias=False)
         if qkv_bias:
@@ -89,28 +91,32 @@ class Attention(nn.Module):
         qkv_bias = None
         if self.q_bias is not None:
             qkv_bias = torch.cat((self.q_bias, torch.zeros_like(self.v_bias, requires_grad=False), self.v_bias))
-        # qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+
         qkv = F.linear(input=x, weight=self.qkv.weight, bias=qkv_bias)
         qkv = qkv.reshape(B, N, 3, self.num_heads, -1).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)
-
-        q = q * self.scale
+        q, k, v = qkv.unbind(dim=0)   # make torchscript happy (cannot use tensor as tuple)
 
         t1 = time.time()
-        if attn_mask is not None:
-            assert not self.flash_attention, "Flash attention does not support attn_mask. Consider using casual mask or torch 2.0"
+            
         if self.flash_attention:
+            q = q * self.scale                        
             qkv = torch.stack([q, k, v], 0)
             qkv = qkv.permute(1, 3, 0, 2, 4)  # .shape # (B, S, 3, H, D)
-            x, _ = self.fa(qkv)
+            x = self.fa(qkv)
             x = x.permute(0, 2, 1, 3)
+        elif hasattr(torch.nn.functional, 'scaled_dot_product_attention'):
+            x = F.scaled_dot_product_attention(
+                query=q, key=k, value=v, dropout_p=self.attn_drop_rate, attn_mask=attn_mask
+            )
         else:
+            q = q * self.scale            
             attn = (q @ k.transpose(-2, -1))
             if attn_mask is not None:
                 attn = attn.masked_fill(attn_mask==1, float('-inf'))
             attn = attn.softmax(dim=-1)
             attn = self.attn_drop(attn)
             x = (attn @ v)
+
         t2 = time.time()
         # print("attention %s flash attention: %0.6f" % (['WITHOUT', 'WITH'][int(self.flash_attention)],
         #                                                (t2-t1)))

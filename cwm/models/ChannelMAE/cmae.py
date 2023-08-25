@@ -600,6 +600,37 @@ class ChannelMae(nn.Module):
 
         return self.encoder.patchifier.patches_to_video(all_predicted_patches)
 
+    def mask_image(
+            self,
+            image: torch.Tensor,
+            mask: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Zero out the masked patches in image
+        """
+        group_masks = torch.split(mask, self.token_channel_group_splits, dim=1)
+        image_patches = self.patchify(image, squeeze_channel_dim=False)
+
+        group_inds = self.channel_group_start_inds
+        out = torch.cat(
+            [
+                self._add_visible_tokens(
+                    predicted_patches=torch.zeros(
+                        image.size(0),
+                        int(group_mask.sum() / group_mask.size(0)),
+                        self.patch_dim,
+                        self.channel_partition[idx]
+                    ).to(image),
+                    input_image=image[:, group_inds[idx]:group_inds[idx+1]],
+                    mask=group_mask
+                )
+                for idx, group_mask in enumerate(group_masks)
+            ],
+            dim=-1
+        )
+
+        return self.encoder.patchifier.patches_to_video(out)
+
     @torch.jit.ignore
     def no_weight_decay(self):
         return {'pos_embed', 'cls_token', 'mask_token'}

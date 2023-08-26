@@ -80,25 +80,14 @@ setup(
 
     install_requires=[
         'numpy',
-        'scipy',
-        'matplotlib==3.5.2',
-        'itermplot',
         'h5py',
         'torch',
         'torchvision',
         'av',
-        'torchaudio',
         'timm',
-        'kornia',
         'future',
         'einops',
-        'opencv-python',
         'iopath',
-        'IPython',
-        'jupyter',
-        'jupyterlab',
-        'jupyter-client==7.3.1',
-        'tornado==6.1'
     ],
 )
 

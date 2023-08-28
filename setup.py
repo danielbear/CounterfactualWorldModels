@@ -83,11 +83,9 @@ setup(
         'h5py',
         'torch',
         'torchvision',
-        'av',
         'timm',
         'future',
-        'einops',
-        'iopath',
+        'einops'
     ],
 )
 

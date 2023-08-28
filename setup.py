@@ -31,7 +31,7 @@ setup(
     long_description=long_description,
 
     # The project's main homepage.
-    url='https://github.com/neuroailab/CounterfactualWorldModels',
+    url='https://github.com/danielbear/CounterfactualWorldModels',
 
     # Author details
     author='Stanford Neuroscience and Artificial Intelligence Lab',

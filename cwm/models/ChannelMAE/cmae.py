@@ -479,7 +479,7 @@ class ChannelMae(nn.Module):
         B, _, C = x_vis.shape
 
         # apply pos embed to decoder inputs
-        decoder_pos_embed = self.pos_embed.type_as(x).to(x.device).clone().detach()
+        decoder_pos_embed = self.pos_embed.expand(B, -1, -1).type_as(x).to(x.device).clone().detach()
 
         # get and apply the positional embedding for the decoder via the mask
         mask = mask.unsqueeze(dim=-1).repeat(1, 1, C)
@@ -886,7 +886,7 @@ class SoftChannelMae(ChannelMae):
 
     def _decode(self, x: torch.Tensor) -> torch.Tensor:
 
-        dec_pos_embed = self.pos_embed.type_as(x).to(x.device).clone().detach()
+        dec_pos_embed = self.pos_embed.expand.type_as(x).to(x.device).clone().detach()
         if self.decode_mask is not None:
             dec_pos_embed = dec_pos_embed.expand(x.size(0), -1, -1)[self.decode_mask].reshape(*x.shape)
         x = x + dec_pos_embed

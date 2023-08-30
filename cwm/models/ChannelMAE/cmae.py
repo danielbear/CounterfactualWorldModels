@@ -558,7 +558,11 @@ class ChannelMae(nn.Module):
         Helper to place ground truth patches where the mask has value False.
         """
         B, N, P, C = predicted_patches.shape
-        input_image_patches = self.patchify(input_image, squeeze_channel_dim=False)
+        input_image_patches = self.patchify(
+            input_image
+            squeeze_channel_dim=False
+        ).to(predicted_patches.dtype)
+        
         full_prediction = torch.zeros_like(input_image_patches)
         visible_patches = input_image_patches[~mask]
 

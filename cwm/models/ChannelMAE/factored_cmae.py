@@ -33,7 +33,12 @@ class FactoredChannelMaeEncoder(ChannelMaeEncoder):
     def __init__(self, channel_embed_std: float = 1.0, *args, **kwargs):
         super(FactoredChannelMaeEncoder, self).__init__(*args, **kwargs)
         self.channel_pos_embed = self._init_channel_pos_embed()
-        trunc_normal_(self.channel_pos_embed, std=channel_embed_std)
+        self._channel_embed_std = channel_embed_std
+        trunc_normal_(self.channel_pos_embed, std=self._channel_embed_std)
+
+    @torch.jit.ignore
+    def no_weight_decay(self):
+        return {'pos_embed', 'channel_pos_embed', 'cls_token'}
 
     def _init_pos_embed(self, use_learnable_pos_emb: bool = False) -> torch.Tensor:
         """The usual `pos_embed` that is returned now is tiled over the channel dimension."""
@@ -74,9 +79,35 @@ class FactoredChannelMaeEncoder(ChannelMaeEncoder):
         return (x, mask)
 
 class FactoredChannelMae(ChannelMae):
-    """ChannelMae that uses the FactoredChannelMaeEncoder"""
+    """ChannelMae that uses the FactoredChannelMaeEncoder and also has a factored decoder_pos_embed"""
+
+    def __init__(self, *args, **kwargs) -> None:
+        """Sets the decoder pos embed as a factored one, with learnable channel_pos_embed"""
+        super(FactoredChannelMae, self).__init__(*args, **kwargs)
+        self.pos_embed = self._set_factored_pos_embed()
+
+    @torch.jit.ignore
+    def no_weight_decay(self):
+        return {'pos_embed', 'channel_pos_embed', 'cls_token', 'mask_token'}
+    
     def _build_encoder(self, params: Dict = {}) -> nn.Module:
         return FactoredChannelMaeEncoder(**params)
+
+    def _set_factored_pos_embed(self) -> None:
+        """Recreate the positional embedding as a factored one, and initialize"""
+        num_patches_per_group = self.encoder.num_patches // self.num_channel_groups
+        pos_embed = get_sinusoid_encoding_table(num_patches_per_group, self.decoder.embed_dim)
+        self.channel_pos_embed = nn.Parameter(
+            torch.zeros(1, self.num_channel_groups, self.decoder.embed_dim))
+        trunc_normal_(self.channel_pos_embed, std=self.encoder._channel_embed_std)
+
+        pos_embed = pos_embed.unsqueeze(1).repeat(1, self.num_channel_groups, 1, 1)
+        chan_embed = self.channel_pos_embed.unsqueeze(2).repeat(1, 1, num_patches_per_group, 1)
+
+        return (pos_embed + chan_embed).reshape(1, self.num_patches, self.decoder.embed_dim)
+        
+
+    
                      
             
     

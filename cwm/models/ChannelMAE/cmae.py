@@ -15,7 +15,6 @@ from cwm.models.ChannelMAE.utils import ImageNetNormalize, ImagePatchEmbed
 
 from cwm.models.VideoMAE.utils import (
     Block,
-    _cfg,
     get_sinusoid_encoding_table,
     interpolate_tensor_with_mask_token,
     masked_tokens,

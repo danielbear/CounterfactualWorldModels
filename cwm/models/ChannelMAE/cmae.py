@@ -559,7 +559,7 @@ class ChannelMae(nn.Module):
         """
         B, N, P, C = predicted_patches.shape
         input_image_patches = self.patchify(
-            input_image
+            input_image,
             squeeze_channel_dim=False
         ).to(predicted_patches.dtype)
         

@@ -462,6 +462,10 @@ class ChannelMae(nn.Module):
             for group_idx in range(self.num_channel_groups)
         ]
 
+    def _get_expanded_pos_embed(self, x: torch.Tensor) -> torch.Tensor:
+        B = x.size(0)
+        return self.pos_embed.expand(B, -1, -1).type_as(x).to(x.device).clone().detach()
+
     def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> List[torch.Tensor]:
         """Pass in an image tensor, mask it, and get the predicted masked patches for each channel group"""
 
@@ -477,7 +481,7 @@ class ChannelMae(nn.Module):
         B, _, C = x_vis.shape
 
         # apply pos embed to decoder inputs
-        decoder_pos_embed = self.pos_embed.expand(B, -1, -1).type_as(x).to(x.device).clone().detach()
+        decoder_pos_embed = self._get_expanded_pos_embed(x_vis)
 
         # get and apply the positional embedding for the decoder via the mask
         mask = mask.unsqueeze(dim=-1).repeat(1, 1, C)

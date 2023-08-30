@@ -562,8 +562,8 @@ class ChannelMae(nn.Module):
         full_prediction = torch.zeros_like(input_image_patches)
         visible_patches = input_image_patches[~mask]
 
-        full_prediction[~mask] = visible_patches.view(B, -1, P, C)
-        full_prediction[mask] = predicted_patches
+        full_prediction[~mask] = visible_patches.view(-1, P, C)
+        full_prediction[mask] = predicted_patches.view(-1, P, C)
 
         return full_prediction
 

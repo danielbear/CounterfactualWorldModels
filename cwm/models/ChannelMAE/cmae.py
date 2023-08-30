@@ -324,8 +324,7 @@ class ChannelMae(nn.Module):
         if self.head_params is not None:
             head_block_kwargs = self.head_params.get('block_kwargs', {})
             head_block_kwargs.update({'flash_attention': use_flash_attention})
-            self.head_params['block_kwargs'] = block_kwargs
-
+            self.head_params['block_kwargs'] = head_block_kwargs
 
         self.encoder = self._build_encoder(params=self.encoder_params)
         if self.decoder_params.get('depth', 4) > 0:

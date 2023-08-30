@@ -117,7 +117,7 @@ class MixedChannelGroupMasker:
 
         assert len(mask_ratios) == self.num_groups
         for idx in range(self.num_groups):
-            self.generators[idx].set_mask_ratio(mask_ratios[idx], group=idx)
+            self.set_group_mask_ratio(mask_ratios[idx], group=idx)
         
                 
 

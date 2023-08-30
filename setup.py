@@ -84,7 +84,7 @@ setup(
         'torchvision',
         'timm',
         'future',
-        'einops'
+        'einops',
     ],
 )
 

@@ -34,7 +34,7 @@ class FactoredChannelMaeEncoder(ChannelMaeEncoder):
         super(FactoredChannelMaeEncoder, self).__init__(*args, **kwargs)
         self.channel_pos_embed = self._init_channel_pos_embed()
         self._channel_embed_std = channel_embed_std
-        trunc_normal_(self.channel_pos_embed, std=self._channel_embed_std)
+        trunc_normal_(self.channel_pos_embed, std=channel_embed_std)
 
     @torch.jit.ignore
     def no_weight_decay(self):
@@ -73,8 +73,7 @@ class FactoredChannelMaeEncoder(ChannelMaeEncoder):
         x, mask = super(FactoredChannelMaeEncoder, self).tokenize(*args, **kwargs)
 
         # add the channel pos embed
-        channel_pos_embed = self.channel_pos_embed.type_as(x).to(x.device).clone().detach()
-        x = x + channel_pos_embed
+        x = x + self.channel_pos_embed.to(x).expand(x.size(0), -1, -1)
 
         return (x, mask)
 

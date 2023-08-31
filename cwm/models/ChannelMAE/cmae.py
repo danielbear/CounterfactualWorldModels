@@ -137,7 +137,7 @@ class ChannelMaeEncoder(ChannelMaeDecoder):
             block_func: nn.Module = Block,
             block_kwargs: Dict = {},
             init_values: Optional[float] = None,
-            use_learnable_pos_emb: bool = False
+            use_learnable_pos_embed: bool = False
     ) -> None:
 
         # initialize Transformer blocks using parent class ("Decoder")
@@ -190,8 +190,9 @@ class ChannelMaeEncoder(ChannelMaeDecoder):
         self._build_patch_embedding_layers()
 
         # create positional embedding, treating channel groups as 'frames'
-        self.pos_embed = self._init_pos_embed(use_learnable_pos_emb)
-        if use_learnable_pos_emb:
+        self._use_learnable_pos_embed = use_learnable_pos_embed
+        self.pos_embed = self._init_pos_embed(use_learnable_pos_embed)
+        if use_learnable_pos_embed:
             trunc_normal_(self.pos_embed, std=0.02)
 
         # init
@@ -210,6 +211,14 @@ class ChannelMaeEncoder(ChannelMaeDecoder):
         return sum(
             [patch_embed_group.get_num_patches(self.image_size) for patch_embed_group in self.patch_embed]
         )
+
+    @property
+    def num_tokens(self):
+        return self.num_patches
+
+    @property
+    def num_tokens_per_channel_group(self):
+        return self.num_tokens // self.num_channel_groups
 
     @property
     def mask_size(self):
@@ -236,6 +245,22 @@ class ChannelMaeEncoder(ChannelMaeDecoder):
 
         return get_sinusoid_encoding_table(self.num_patches, self.embed_dim)
 
+    def _apply_pos_embed_to_tokens(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Apply the positional embedding to the tokenized input.
+        Original implementation is just to add them pointwise.
+        """
+        
+        print("tokenizing with learnable pos embed?", self._use_learnable_pos_embed)
+        if not self._use_learnable_pos_embed:
+            pos_embed = self.pos_embed.type_as(x).to(x.device).clone().detach()
+        else:
+            pos_embed = self.pos_embed.to(x)
+            
+        x = x + pos_embed
+
+        return x
+
     def tokenize(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """Tokenize by applying each patch embedding layer to the respective channel group"""
         
@@ -257,10 +282,9 @@ class ChannelMaeEncoder(ChannelMaeDecoder):
             ],
             dim=1
         )
-
+        
         # add pos embed
-        pos_embed = self.pos_embed.type_as(x).to(x.device).clone().detach()
-        x = x + pos_embed
+        x = self._apply_pos_embed_to_tokens(x)
 
         return (x, mask)
 
@@ -275,6 +299,7 @@ class ChannelMaeEncoder(ChannelMaeDecoder):
         assert C == self.num_channels, (C, self.num_channels)
 
         x, mask = self.tokenize(x, mask)
+        
         B, _, D = x.shape
 
         x_vis = x[~mask].reshape(B, -1, D)

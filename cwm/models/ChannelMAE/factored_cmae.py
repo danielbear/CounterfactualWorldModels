@@ -40,42 +40,56 @@ class FactoredChannelMaeEncoder(ChannelMaeEncoder):
     def no_weight_decay(self):
         return {'pos_embed', 'channel_pos_embed', 'cls_token'}
 
-    def _init_pos_embed(self, use_learnable_pos_emb: bool = False) -> torch.Tensor:
+    def _init_pos_embed(self, use_learnable_pos_embed: bool = False) -> torch.Tensor:
         """The usual `pos_embed` that is returned now is tiled over the channel dimension."""
 
-        num_patches = self.num_patches // self.num_channel_groups
-        if use_learnable_pos_emb:
-            pos_embed = nn.Parameter(torch.zeros(1, num_patches, self.embed_dim))
+        if use_learnable_pos_embed:
+            pos_embed = nn.Parameter(torch.zeros(1, self.num_tokens_per_channel_group, self.embed_dim))
         else:
-            pos_embed = get_sinusoid_encoding_table(num_patches, self.embed_dim)
+            pos_embed = get_sinusoid_encoding_table(self.num_tokens_per_channel_group, self.embed_dim)
 
-        return (
-            pos_embed
-            .unsqueeze(1)
-            .repeat(1, self.num_channel_groups, 1, 1)
-            .reshape(1, self.num_patches, self.embed_dim)
-        )
+        return pos_embed
 
     def _init_channel_pos_embed(self) -> torch.Tensor:
         """A learnable `channel_pos_embed` that varies only by channel idx"""
         
-        num_patches_per_group = self.num_patches // self.num_channel_groups
-        return (
-            nn.Parameter(torch.zeros(1, self.num_channel_groups, self.embed_dim), requires_grad=True)
-            .unsqueeze(2)
-            .repeat(1, 1, num_patches_per_group, 1)
-            .reshape(1, self.num_patches, self.embed_dim)
-        )
+        return nn.Parameter(torch.zeros(1, self.num_channel_groups, self.embed_dim), requires_grad=True)
 
-    def tokenize(self, *args, **kwargs) -> torch.Tensor:
+    def _broadcast_pos_embed(self, pe: torch.Tensor) -> torch.Tensor:
+        """Broadcasts either the `pos_embed` or the `channel_pos_embed`; which is inferred from shape"""
+        N = pe.size(1)
 
-        # usual tokenization adds the spatial pos_embed
-        x, mask = super(FactoredChannelMaeEncoder, self).tokenize(*args, **kwargs)
+        if N == self.num_tokens_per_channel_group:
+            tile = lambda x: x.unsqueeze(1).repeat(1, self.num_channel_groups, 1, 1)
+        elif N == self.num_channel_groups:
+            tile = lambda x: x.unsqueeze(2).repeat(1, 1, self.num_tokens_per_channel_group, 1)
+        else:
+            raise ValueError("num_tokens must be num_channel_groups or num_tokens_per_channel_group")
 
-        # add the channel pos embed
-        x = x + self.channel_pos_embed.to(x).expand(x.size(0), -1, -1)
+        return tile(pe).reshape(pe.size(0), self.num_tokens, self.embed_dim)
 
-        return (x, mask)
+    def _apply_pos_embed_to_tokens(self, x: torch.Tensor) -> torch.Tensor:
+        """Overwrites usual tokenwise addition. Instead broadcasts `pos_embed` and `channel_pos_embed`"""
+
+        B = x.size(0)
+
+        # get spatial pos embed
+        if not self._use_learnable_pos_embed:
+            pos_embed = self.pos_embed.type_as(x).to(x.device).clone().detach()
+        else:
+            pos_embed = self.pos_embed.to(x)
+
+        # broadcast across channel groups
+        pos_embed = self._broadcast_pos_embed(pos_embed)
+
+        # get channelwise pos embed and broacast spatially within each channel
+        channel_pos_embed = self.channel_pos_embed.to(x)
+        channel_pos_embed = self._broadcast_pos_embed(channel_pos_embed)
+
+        x = x + pos_embed
+        x = x + channel_pos_embed
+
+        return x
 
 class FactoredChannelMae(ChannelMae):
     """ChannelMae that uses the FactoredChannelMaeEncoder and also has a factored decoder_pos_embed"""
@@ -83,8 +97,11 @@ class FactoredChannelMae(ChannelMae):
     def __init__(self, *args, **kwargs) -> None:
         """Sets the decoder pos embed as a factored one, with learnable channel_pos_embed"""
         super(FactoredChannelMae, self).__init__(*args, **kwargs)
-        self.pos_embed = self._init_pos_embed()
-        self.channel_pos_embed = self._init_channel_pos_embed()
+
+        ## init the pos embeddings using the FactoredChannelMaeEncoder
+        self.embed_dim = self.decoder.embed_dim
+        self.pos_embed = FactoredChannelMaeEncoder._init_pos_embed(self, use_learnable_pos_embed=False)
+        self.channel_pos_embed = FactoredChannelMaeEncoder._init_channel_pos_embed(self)
         trunc_normal_(self.channel_pos_embed, std=self.encoder._channel_embed_std)
 
     @torch.jit.ignore
@@ -94,36 +111,16 @@ class FactoredChannelMae(ChannelMae):
     def _build_encoder(self, params: Dict = {}) -> nn.Module:
         return FactoredChannelMaeEncoder(**params)
 
-    def _init_pos_embed(self) -> torch.Tensor:
-        """The usual `pos_embed` that is returned now is tiled over the channel dimension."""
-
-        num_patches = self.num_patches // self.num_channel_groups
-        pos_embed = get_sinusoid_encoding_table(num_patches, self.decoder.embed_dim)
-
-        return (
-            pos_embed
-            .unsqueeze(1)
-            .repeat(1, self.num_channel_groups, 1, 1)
-            .reshape(1, self.num_patches, self.decoder.embed_dim)
-        )
-
-    def _init_channel_pos_embed(self) -> torch.Tensor:
-        """A learnable `channel_pos_embed` that varies only by channel idx"""
-        
-        num_patches_per_group = self.encoder.num_patches // self.num_channel_groups
-        return (
-            nn.Parameter(torch.zeros(1, self.num_channel_groups, self.decoder.embed_dim))
-            .unsqueeze(2)
-            .repeat(1, 1, num_patches_per_group, 1)
-            .reshape(1, self.encoder.num_patches, self.decoder.embed_dim)
-        )
-
     def _get_expanded_pos_embed(self, x: torch.Tensor) -> torch.Tensor:
         """Add both the spatial and channelwise pos embed. Don't detach the latter!"""
         B = x.size(0)
-        pos_embed = super()._get_expanded_pos_embed(x)
-        pos_embed += self.channel_pos_embed.expand(B, -1, -1).to(pos_embed)
-        return pos_embed
+        pos_embed = FactoredChannelMaeEncoder._broadcast_pos_embed(self, self.pos_embed)        
+        pos_embed = pos_embed.expand(B, -1, -1).to(x).clone().detach()
+
+        channel_pos_embed = FactoredChannelMaeEncoder._broadcast_pos_embed(self, self.channel_pos_embed)
+        channel_pos_embed = channel_pos_embed.expand(B, -1, -1).to(pos_embed)
+
+        return pos_embed + channel_pos_embed
         
 
     

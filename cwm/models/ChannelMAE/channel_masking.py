@@ -107,7 +107,7 @@ class MixedChannelGroupMasker:
 
         assert len(num_visibles) == self.num_groups
         for idx in range(self.num_groups):
-            self.generators[idx].set_num_visible(num_visibles[idx], group=idx)
+            self.set_group_num_visible(num_visibles[idx], group=idx)
                 
 
     def set_generator_ratios(self, mask_ratios: Union[List[float], float]) -> None:
@@ -118,6 +118,59 @@ class MixedChannelGroupMasker:
         assert len(mask_ratios) == self.num_groups
         for idx in range(self.num_groups):
             self.set_group_mask_ratio(mask_ratios[idx], group=idx)
+
+class RandomPartitionChannelGroupMasker(MixedChannelGroupMasker):
+    """
+    Randomly partition a fixed number of visible patches across the channel groups.
+    """
+    def __init__(
+            self,
+            height: int,
+            width: int,
+            mask_ratio: float,
+            channel_groups_list: List[ChannelGroups],
+            seed: int = 0,
+            clumping_factor: int = 1,
+            randomize_num_visible: bool = False
+    ) -> None:
+
+        # initialize the generators, but their mask_ratios will be overwritten
+        super().__init__(
+            height=height,
+            width=width,
+            channel_groups_list=channel_groups_list,
+            seed=seed,
+            clumping_factor=clumping_factor,
+            randomize_num_visible=randomize_num_visible
+        )
+
+        self.mask_ratio = mask_ratio
+        self.set_total_num_visible_from_ratio(self.mask_ratio)
+
+    def set_total_num_visible_from_ratio(self, mask_ratio: float) -> None:
+
+        total_num_patches = sum([gen.num_patches_per_frame for gen in self.generators])
+        self.total_num_visible = int((1.0 - mask_ratio) * total_num_patches)
+
+    def _set_num_visibles_this_batch(self) -> None:
+
+        self._num_visibles_this_batch = [0] * self.num_groups
+        for _ in range(self.total_num_visible):
+            idx = self.generators[0].rng.randint(self.num_groups)
+            self._num_visibles_this_batch[idx] += 1
+
+        self.set_generator_num_visibles(self._num_visibles_this_batch)
+
+    def __call__(self, x: Optional[torch.Tensor] = None) -> torch.Tensor:
+
+        self._set_num_visibles_this_batch()
+        return super().__call__(x=x)
+
+    
+
+        
+    
+    
         
                 
 

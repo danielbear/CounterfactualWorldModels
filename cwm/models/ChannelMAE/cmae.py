@@ -1,17 +1,13 @@
-import os
 import copy
 import math
-import numpy as np
 from typing import Tuple, List, Optional, Union, Callable, Dict
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from einops import rearrange
 
 from functools import partial
 
 from cwm.models.patches import Patchify
-from cwm.models.ChannelMAE.utils import ImageNetNormalize, ImagePatchEmbed
+from cwm.models.ChannelMAE.utils import ImagePatchEmbed
 
 from cwm.models.VideoMAE.utils import (
     Block,
@@ -23,7 +19,7 @@ from cwm.models.VideoMAE.utils import (
 )
 
 _LayerNorm = partial(nn.LayerNorm, eps=1e-6)
-
+TwoTuple = Tuple[int, int]
 
 class ChannelMaeDecoder(nn.Module):
     """A stack of transformer layers that optionally returns only the last N tokens"""
@@ -293,7 +289,7 @@ class ChannelMaeEncoder(ChannelMaeDecoder):
 
         try:
             B, C, H, W = x.shape
-        except:
+        except Exception:
             assert (len(x.shape) == 5) and (x.shape[2] == 1), x.shape
             x = x.squeeze(2)
             B, C, H, W = x.shape
@@ -646,7 +642,7 @@ class ChannelMae(nn.Module):
         Zero out the masked patches in image
         """
         group_masks = torch.split(mask, self.token_channel_group_splits, dim=1)
-        image_patches = self.patchify(image, squeeze_channel_dim=False)
+        # image_patches = self.patchify(image, squeeze_channel_dim=False)
 
         group_inds = self.channel_group_start_inds
         out = torch.cat(

@@ -1,18 +1,11 @@
 """ChannelMAEs that factor the positional embedding into spatial and channelwise components"""
-import os
-import math
-import numpy as np
-
-from typing import Tuple, List, Optional, Union, Callable, Dict
+from typing import Dict
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-
-from functools import partial
 
 from cwm.models.ChannelMAE.cmae import (
-    ChannelMaeEncoder, SoftChannelMaeEncoder,
-    ChannelMae, SoftChannelMae, SoftInputChannelMae
+    ChannelMaeEncoder,
+    ChannelMae,
 )
 
 from cwm.models.VideoMAE.utils import (
@@ -71,7 +64,7 @@ class FactoredChannelMaeEncoder(ChannelMaeEncoder):
     def _apply_pos_embed_to_tokens(self, x: torch.Tensor) -> torch.Tensor:
         """Overwrites usual tokenwise addition. Instead broadcasts `pos_embed` and `channel_pos_embed`"""
 
-        B = x.size(0)
+        # B = x.size(0)
 
         # get spatial pos embed
         if not self._use_learnable_pos_embed:

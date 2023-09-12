@@ -1,9 +1,8 @@
 import itertools
 from dataclasses import dataclass
-from typing import List, Optional, Union, Tuple
+from typing import List, Optional, Union
 
 import torch
-import torch.nn as nn
 
 from cwm.models.masking import MaskingGenerator
 

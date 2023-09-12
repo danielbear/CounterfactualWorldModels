@@ -23,7 +23,6 @@ from cwm.models.VideoMAE.utils import (
 )
 
 _LayerNorm = partial(nn.LayerNorm, eps=1e-6)
-TwoTuple = Tuple[int, int]
 
 
 class ChannelMaeDecoder(nn.Module):
@@ -116,6 +115,8 @@ class ChannelMaeDecoder(nn.Module):
         
 class ChannelMaeEncoder(ChannelMaeDecoder):
     """An encoder for a MAE that treats groups of channels as different 'frames'"""
+    image_size: TwoTuple
+
     def __init__(
             self,
             image_size: Union[int, TwoTuple] = (224, 224),
@@ -557,14 +558,19 @@ class ChannelMae(nn.Module):
             self,
             x: torch.Tensor,
             mask: torch.Tensor,
+            targets: Optional[torch.Tensor] = None,
             loss_fn: Optional[Callable] = None
     ) -> torch.Tensor:
         """
         Get the predictions and labels from each channel group, and apply loss_fn. Defaults to MSE
         """
         group_preds = self.forward(x, mask)
+
+        if targets is None:
+            targets = x
+
         with torch.no_grad():
-            group_labels = self.compute_labels(x, mask)
+            group_labels = self.compute_labels(targets, mask)
 
         loss = 0.0
         if loss_fn is None:

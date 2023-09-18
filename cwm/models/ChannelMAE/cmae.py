@@ -251,7 +251,6 @@ class ChannelMaeEncoder(ChannelMaeDecoder):
         Original implementation is just to add them pointwise.
         """
         
-        print("tokenizing with learnable pos embed?", self._use_learnable_pos_embed)
         if not self._use_learnable_pos_embed:
             pos_embed = self.pos_embed.type_as(x).to(x.device).clone().detach()
         else:

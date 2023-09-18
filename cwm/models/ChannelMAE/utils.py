@@ -1,5 +1,3 @@
-from functools import partial
-import numpy as np
 import torch
 import torch.nn as nn
 
@@ -53,7 +51,7 @@ class ImagePatchEmbed(nn.Module):
         # handle videos with single frame
         try:
             B, C, H, W = x.shape
-        except:
+        except Exception:
             assert (len(x.shape) == 5) and (x.shape[2] == 1), x.shape
             x = x.squeeze(2)
             B, C, H, W = x.shape

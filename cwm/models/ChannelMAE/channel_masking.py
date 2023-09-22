@@ -1,6 +1,6 @@
 import itertools
 from dataclasses import dataclass
-from typing import Any, List, Optional, Union, Tuple
+from typing import Any, List, Optional, Union, Tuple, Literal
 
 import torch
 from cwm.models.ChannelMAE.cmae import TwoTuple
@@ -164,9 +164,8 @@ class RandomPartitionChannelGroupMasker(MixedChannelGroupMasker):
         return super().__call__(x=x)
 
 
-# TODO: hmm, how to make this a _target_ ? Can target be any callable? If so, just make this a func
 def create_masker(
-    masker: Union[MixedChannelGroupMasker, RandomPartitionChannelGroupMasker],
+    masker_name: Literal["MixedChannelGroupMasker", "RandomPartitionChannelGroupMasker"],
     image_size: int,
     patch_size: int,
     num_channels: int,
@@ -200,7 +199,7 @@ def create_masker(
     ]
 
 
-    if isinstance(masker, RandomPartitionChannelGroupMasker):
+    if masker_name == "RandomPartitionChannelGroupMasker":
         return RandomPartitionChannelGroupMasker(
             height=height,
             width=width,
@@ -208,7 +207,7 @@ def create_masker(
             channel_groups_list=channel_groups,
             **kwargs
         )
-    elif isinstance(masker, MixedChannelGroupMasker):
+    elif masker_name == "MixedChannelGroupMasker":
         return MixedChannelGroupMasker(
             height=height,
             width=width,
@@ -219,6 +218,6 @@ def create_masker(
         raise NotImplementedError(
             (
                 "Masker must be one of 'RandomPartitionChannelGroupMasker' or"
-                f"'MixedChannelGroupMasker', but got {masker.__class__.__name__}"
+                f"'MixedChannelGroupMasker', but got {masker_name}"
             )
         )

@@ -572,25 +572,15 @@ class ChannelMae(nn.Module):
             loss_fn = nn.MSELoss(reduction='none')
 
         # skip groups that have no masked tokens
-        group_losses = []
+        loss = torch.tensor(0.0, device=targets.device, dtype=targets.dtype)
         for idx, pred in enumerate(group_preds):
-            pred_mask = torch.isfinite(pred).to(pred.dtype).detach()
-            labels_mask = torch.isfinite(group_labels[idx]).to(group_labels[idx].dtype).detach()
             group_loss = loss_fn(
-                pred * pred_mask,
-                group_labels[idx] * labels_mask
-            ) if pred.size(1) > 0 else torch.tensor(0.0).to(pred)
-            group_loss = (group_loss * torch.isfinite(group_loss).to(group_loss.dtype)).mean((-2, -1)) # [B]
-            group_losses.append(group_loss)
+                pred,
+                group_labels[idx],
+            ) if pred.size(1) > 0 else torch.zeros_like(pred)
+            loss_mask = torch.isfinite(group_loss).detach()
+            loss += group_loss[loss_mask].mean()
             
-        loss = torch.stack(group_losses, dim=-1) # [B, num_channel_groups]
-        loss_mask = torch.isfinite(loss).detach().to(loss.dtype)
-        loss = (loss * loss_mask).sum(-1).mean()
-
-        print(f"Number of finite loss channel groups: {loss_mask.sum().item()}")
-        
-        # loss = loss + torch.isfinite(group_loss).to(group_loss.dtype) * group_loss
-
         return loss
 
     def _add_visible_tokens(

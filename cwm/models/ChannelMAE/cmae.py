@@ -573,7 +573,9 @@ class ChannelMae(nn.Module):
 
         # skip groups that have no masked tokens
         for idx, pred in enumerate(group_preds):
-            loss += loss_fn(pred, group_labels[idx]) if pred.size(1) > 0 else 0.0
+            group_loss = loss_fn(pred, group_labels[idx]) if pred.size(1) > 0 else 0.0
+            if torch.isfinite(group_loss).amin().item():
+                loss += group_loss
 
         return loss
 

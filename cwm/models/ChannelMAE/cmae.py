@@ -567,14 +567,29 @@ class ChannelMae(nn.Module):
         with torch.no_grad():
             group_labels = self.compute_labels(targets, mask)
 
-        loss = torch.tensor(0.0, dtype=targets.dtype, device=targets.device)
+        # loss = torch.tensor(0.0, dtype=targets.dtype, device=targets.device)
         if loss_fn is None:
-            loss_fn = nn.MSELoss()
+            loss_fn = nn.MSELoss(reduction='none')
 
         # skip groups that have no masked tokens
+        group_losses = []
         for idx, pred in enumerate(group_preds):
-            group_loss = loss_fn(pred, group_labels[idx]) if pred.size(1) > 0 else 0.0
-            loss = loss + torch.isfinite(group_loss).to(group_loss.dtype) * group_loss
+            pred_mask = torch.isfinite(pred).to(pred.dtype).detach()
+            labels_mask = torch.isfinite(group_labels[idx]).to(group_labels[idx].dtype).detach()
+            group_loss = loss_fn(
+                pred * pred_mask,
+                group_labels[idx] * labels_mask
+            ) if pred.size(1) > 0 else torch.tensor(0.0).to(pred)
+            group_loss = (group_loss * torch.isfinite(group_loss).to(group_loss.dtype)).mean((-2, -1)) # [B]
+            group_losses.append(group_loss)
+            
+        loss = torch.stack(group_losses, dim=-1) # [B, num_channel_groups]
+        loss_mask = torch.isfinite(loss).detach().to(loss.dtype)
+        loss = (loss * loss_mask).sum(-1).mean()
+
+        print(f"Number of finite loss channel groups: {loss_mask.sum().item()}")
+        
+        # loss = loss + torch.isfinite(group_loss).to(group_loss.dtype) * group_loss
 
         return loss
 

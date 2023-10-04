@@ -567,15 +567,14 @@ class ChannelMae(nn.Module):
         with torch.no_grad():
             group_labels = self.compute_labels(targets, mask)
 
-        loss = 0.0
+        loss = torch.tensor(0.0, dtype=targets.dtype, device=targets.device)
         if loss_fn is None:
             loss_fn = nn.MSELoss()
 
         # skip groups that have no masked tokens
         for idx, pred in enumerate(group_preds):
             group_loss = loss_fn(pred, group_labels[idx]) if pred.size(1) > 0 else 0.0
-            if torch.isfinite(group_loss).amin().item():
-                loss += group_loss
+            loss = loss + torch.isfinite(group_loss).to(group_loss.dtype) * group_loss
 
         return loss
 

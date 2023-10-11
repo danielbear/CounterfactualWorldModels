@@ -19,6 +19,7 @@ def _cfg(url='', **kwargs):
         **kwargs
     }
 
+_LayerNormNoBias = partial(nn.LayerNorm, eps=1e-6, elementwise_affine=False)
 
 class DropPath(nn.Module):
     """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks).
@@ -56,8 +57,18 @@ class Mlp(nn.Module):
 
 class Attention(nn.Module):
     def __init__(
-            self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0.,
-            proj_drop=0., attn_head_dim=None, flash_attention=False):
+            self,
+            dim,
+            num_heads=8,
+            qkv_bias=False,
+            qk_scale=None,
+            qk_norm=False,
+            attn_drop=0.,
+            proj_drop=0.,
+            attn_head_dim=None,
+            flash_attention=False,
+            norm_layer=_LayerNormNoBias
+    ):
         super().__init__()
         self.num_heads = num_heads
         head_dim = dim // num_heads
@@ -82,6 +93,9 @@ class Attention(nn.Module):
             self.q_bias = None
             self.v_bias = None
 
+        self.q_norm = norm_layer(head_dim) if qk_norm else nn.Identity()
+        self.k_norm = norm_layer(head_dim) if qk_norm else nn.Identity()
+
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(all_head_dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
@@ -95,6 +109,7 @@ class Attention(nn.Module):
         qkv = F.linear(input=x, weight=self.qkv.weight, bias=qkv_bias)
         qkv = qkv.reshape(B, N, 3, self.num_heads, -1).permute(2, 0, 3, 1, 4)
         q, k, v = qkv.unbind(dim=0)   # make torchscript happy (cannot use tensor as tuple)
+        q, k = self.q_norm(q), self.k_norm(k)
 
         t1 = time.time()
             
@@ -129,13 +144,13 @@ class Attention(nn.Module):
 
 class Block(nn.Module):
 
-    def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
+    def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, qk_norm=False, drop=0., attn_drop=0.,
                  drop_path=0., init_values=None, act_layer=nn.GELU, norm_layer=nn.LayerNorm,
                  attn_head_dim=None, in_dim=None, flash_attention=False):
         super().__init__()
         self.norm1 = norm_layer(dim)
         self.attn = Attention(
-            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
+            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, qk_norm=qk_norm, norm_layer=norm_layer,
             attn_drop=attn_drop, proj_drop=drop, attn_head_dim=attn_head_dim, flash_attention=flash_attention)
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()

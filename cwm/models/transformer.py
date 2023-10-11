@@ -140,9 +140,12 @@ class Attention(nn.Module):
             self.q_bias = self.v_bias = None
 
         self.flash_attention = flash_attention
+
+        self.attn_drop_rate = attention_dropout_prob                    
         if self.flash_attention:
-            from flash_attn.flash_attention import FlashAttention
-            self.fa = FlashAttention(softmax_scale=1, attention_dropout=attention_dropout_prob)
+            from flash_attn import flash_attn_qkvpacked_func
+            self.fa = lambda qkv: flash_attn_qkvpacked_func(
+                qkv, dropout_p=self.attn_drop_rate, softmax_scale=1)        
 
         self.attn_drop = nn.Dropout(attention_dropout_prob)
         self.projection = nn.Linear(self.head_dim * self.num_heads, self.out_dim)
@@ -159,25 +162,27 @@ class Attention(nn.Module):
 
         qkv = F.linear(x, weight=self.qkv.weight, bias=qkv_bias)
         qkv = qkv.reshape(B,N,3,self.num_heads,self.head_dim).permute(2,0,3,1,4) # [3,B,H,N,D]
-        q, k, v = list(qkv)
-        q = q * self.scale
-        t1 = time.time()
+        q, k, v = qkv.unbind(dim=0)
+
         if self.flash_attention:
-            print("using flash attention (custom)")
-            qkv = torch.stack([q,k,v], 0)
-            qkv = qkv.permute(1,3,0,2,4)
-            x, _ = self.fa(qkv)
+            q = q * self.scale                        
+            qkv = torch.stack([q, k, v], 0)
+            qkv = qkv.permute(1, 3, 0, 2, 4)  # .shape # (B, S, 3, H, D)
+            x = self.fa(qkv)
             x = x.permute(0, 2, 1, 3)
+        elif hasattr(torch.nn.functional, 'scaled_dot_product_attention'):
+            x = F.scaled_dot_product_attention(
+                query=q, key=k, value=v, dropout_p=self.attn_drop_rate, attn_mask=attn_mask
+            )
         else:
-            attn = (q @ k.transpose(-2, -1)).softmax(-1) # [B,H,N,N]
-            if return_attention:
-                return attn
+            q = q * self.scale            
+            attn = (q @ k.transpose(-2, -1))
+            if attn_mask is not None:
+                attn = attn.masked_fill(attn_mask==1, float('-inf'))
+            attn = attn.softmax(dim=-1)
             attn = self.attn_drop(attn)
             x = (attn @ v)
-        t2 = time.time()
-        print("custom attention %s flash attention: %0.6f" % (['WITHOUT', 'WITH'][int(self.flash_attention)],
-                                                       (t2-t1)))
-            
+        
         x = x.transpose(1, 2).reshape(B,N,self.head_dim*self.num_heads) # [B,N,H*D]
         x = self.projection(x)
         x = self.proj_drop(x)

@@ -19,7 +19,7 @@ def _cfg(url='', **kwargs):
         **kwargs
     }
 
-_LayerNormNoBias = partial(nn.LayerNorm, eps=1e-6, elementwise_affine=False)
+LayerNormNoAffine = partial(nn.LayerNorm, eps=1e-6, elementwise_affine=False)
 
 class DropPath(nn.Module):
     """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks).
@@ -67,7 +67,7 @@ class Attention(nn.Module):
             proj_drop=0.,
             attn_head_dim=None,
             flash_attention=False,
-            norm_layer=_LayerNormNoBias
+            norm_layer=LayerNormNoAffine
     ):
         super().__init__()
         self.num_heads = num_heads
@@ -145,7 +145,7 @@ class Attention(nn.Module):
 class Block(nn.Module):
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, qk_norm=False, drop=0., attn_drop=0.,
-                 drop_path=0., init_values=None, act_layer=nn.GELU, norm_layer=nn.LayerNorm, qk_norm_layer=_LayerNormNoBias,
+                 drop_path=0., init_values=None, act_layer=nn.GELU, norm_layer=nn.LayerNorm, qk_norm_layer=LayerNormNoAffine,
                  attn_head_dim=None, in_dim=None, flash_attention=False):
         super().__init__()
         self.norm1 = norm_layer(dim)

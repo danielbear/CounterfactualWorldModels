@@ -77,7 +77,7 @@ class ChannelMaeDecoder(nn.Module):
             nn.init.xavier_uniform_(m.weight)
             if isinstance(m, nn.Linear) and m.bias is not None:
                 nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
+        elif isinstance(m, nn.LayerNorm) and m.bias is not None:
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
@@ -423,7 +423,7 @@ class ChannelMae(nn.Module):
             nn.init.xavier_uniform_(m.weight)
             if isinstance(m, nn.Linear) and m.bias is not None:
                 nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
+        elif isinstance(m, nn.LayerNorm) and m.bias is not None:
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 

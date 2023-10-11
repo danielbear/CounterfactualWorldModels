@@ -111,7 +111,7 @@ class ParallelScalingBlock(nn.Module):
             x_attn = x_attn.permute(0, 2, 1, 3)
         else:
             x_attn = F.scaled_dot_product_attention(
-                query=q, key=k, value=v, dropout_p=self.attn_drop_rate
+                query=q, key=k, value=v, dropout_p=self.attn_drop.p
             )
 
         x_attn = x_attn.transpose(1, 2).reshape(B, N, C)

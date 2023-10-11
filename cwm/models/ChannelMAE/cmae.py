@@ -11,15 +11,38 @@ from cwm.models.ChannelMAE.utils import ImagePatchEmbed
 
 from cwm.models.VideoMAE.utils import (
     Block,
+    RmsNorm,
     get_sinusoid_encoding_table,
     interpolate_tensor_with_mask_token,
     masked_tokens,
     trunc_normal_,
     to_2tuple
 )
+from cwm.models.VideoMAE.parallel import ParallelScalingBlock
 
 _LayerNorm = partial(nn.LayerNorm, eps=1e-6)
+LayerNormNoAffine = partial(nn.LayerNorm, eps=1e-6, elementwise_affine=False)
 TwoTuple = Tuple[int, int]
+
+def get_norm_layer(layer: Union[str, Callable]) -> Callable:
+    if isinstance(layer, Callable):
+        return layer
+    layer_dict = {
+        'LayerNorm': _LayerNorm,
+        'LayerNormNoAffine': LayerNormNoAffine,
+        'RmsNorm': RmsNorm
+    }
+    return layer_dict[layer]
+
+def get_block_func(module: Union[str, Callable]) -> Callable:
+    if isinstance(module, Callable):
+        return module
+
+    module_dict = {
+        'Block': Block,
+        'ParallelScalingBlock': ParallelScalingBlock
+    }
+    return module_dict[module]
 
 class ChannelMaeDecoder(nn.Module):
     """A stack of transformer layers that optionally returns only the last N tokens"""
@@ -35,7 +58,7 @@ class ChannelMaeDecoder(nn.Module):
             drop_rate: Optional[float] = None,
             attn_drop_rate: Optional[float] = None,
             drop_path_rate: Optional[float] = None,
-            norm_layer: Callable = _LayerNorm,
+            norm_layer: Union[str, Callable] = _LayerNorm,
             block_func: nn.Module = Block,
             block_kwargs: Dict = {},
             init_values: Optional[float] = None
@@ -43,6 +66,10 @@ class ChannelMaeDecoder(nn.Module):
         
         super().__init__()
         self.embed_dim = embed_dim
+
+        # get funcs by str if necessary. TODO: hydra
+        block_func = get_block_func(block_func)
+        norm_layer = get_norm_layer(norm_layer)
 
         # build transformer blocks
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate or 0.0, depth)]

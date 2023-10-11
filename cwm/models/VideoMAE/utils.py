@@ -21,6 +21,51 @@ def _cfg(url='', **kwargs):
 
 LayerNormNoAffine = partial(nn.LayerNorm, eps=1e-6, elementwise_affine=False)
 
+class RmsNorm(nn.Module):
+    """
+    Based on `Root Mean Square Layer Normalization` - https://arxiv.org/pdf/1910.07467.pdf
+    """
+    __constants__ = ['normalized_shape', 'eps', 'elementwise_affine']
+    normalized_shape: tuple[int, ...]
+    eps: float
+    elementwise_affine: bool
+
+    def __init__(
+            self,
+            normalized_shape,
+            eps: float = 1e-6,
+            elementwise_affine: bool = True,
+            device=None,
+            dtype=None
+    ) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super().__init__()
+        if isinstance(normalized_shape, int):
+            normalized_shape = (normalized_shape,)
+        self.normalized_shape = tuple(normalized_shape)
+        self.eps = eps
+        self.elementwise_affine = elementwise_affine
+        if self.elementwise_affine:
+            self.weight = nn.Parameter(torch.empty(self.normalized_shape, **factory_kwargs))
+        else:
+            self.register_parameter("weight", None)
+
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        if self.elementwise_affine:
+            nn.init.ones_(self.weight)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        norm_ndim = len(self.normalized_shape)
+        dims = tuple(range(-1, -norm_ndim - 1, -1))
+        var = torch.var(x, dim=dims, keepdim=True)
+        x = x * torch.rsqrt(var + self.eps)
+        if self.weight is not None:
+            x = x * self.weight
+        return x
+        
+
 class DropPath(nn.Module):
     """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks).
     """

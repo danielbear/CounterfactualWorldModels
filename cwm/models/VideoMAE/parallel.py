@@ -4,9 +4,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from cwm.models.VideoMAE.utils import Attention, DropPath, Mlp
+from cwm.models.VideoMAE.utils import Attention, DropPath, Mlp, RmsNorm
 
-_LayerNormNoBias = partial(nn.LayerNorm, eps=1e-6, elementwise_affine=False)
+LayerNormNoAffine = partial(nn.LayerNorm, eps=1e-6, elementwise_affine=False)
 
 class ParallelScalingBlock(nn.Module):
     """Based on `Scaling Vision Transformers to 22 Billion Parameters` - https://arxiv.org/abs/2302.05442"""
@@ -23,7 +23,7 @@ class ParallelScalingBlock(nn.Module):
             drop_path=0.,
             init_values=None,
             act_layer=nn.GELU,
-            norm_layer=_LayerNormNoBias,
+            norm_layer=RmsNorm,
             in_dim=None,
             flash_attention=False
     ) -> None:
@@ -41,7 +41,7 @@ class ParallelScalingBlock(nn.Module):
         # initial norm and linear proj on inputs
         self.in_norm = norm_layer(self.in_dim)
         self.in_proj = nn.Linear(self.in_dim, in_proj_out_dim, bias=qkv_bias)
-        self.in_split = [mlp_hidden_dim] + 3 * [self.dim]
+        self.in_split = 3 * [self.dim] + [mlp_hidden_dim]
 
         # norms and biases
         if qkv_bias:
@@ -50,11 +50,12 @@ class ParallelScalingBlock(nn.Module):
         else:
             self.q_bias = None
             self.v_bias = None
+            self.register_buffer("qkv_bias", torch.zeros(3 * self.dim), persistent=False)
 
         self.mlp_bias = nn.Parameter(torch.zeros(mlp_hidden_dim))
 
-        self.q_norm = norm_layer(head_dim) if qk_norm else nn.Identity()
-        self.k_norm = norm_layer(head_dim) if qk_norm else nn.Identity()
+        self.q_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
+        self.k_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
 
         self.flash_attention = flash_attention
         if self.flash_attention:
@@ -74,11 +75,64 @@ class ParallelScalingBlock(nn.Module):
         else:
             self.gamma = None
 
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()            
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+
+    def _get_in_proj_bias(self) -> torch.Tensor:
+        if self.q_bias is not None:
+            return torch.cat(
+                [
+                    self.q_bias,
+                    torch.zeros_like(self.v_bias, requires_grad=False),
+                    self.v_bias,
+                    self.mlp_bias
+                ]
+            )
+        return torch.cat([self.qkv_bias, self.mlp_bias])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         
         B, N, C = x.shape
+
+        # fuse MLP fc1 and qkv projections
+        y = self.in_norm(x)
+        y = F.linear(y, self.in_proj.weight, bias=self._get_in_proj_bias())
+        q, k, v, x_mlp = torch.split(y, self.in_split, dim=-1)
+
+        # Attn with qk_norm
+        q = self.q_norm(q.view(B, N, self.num_heads, self.head_dim)).transpose(1, 2)
+        k = self.k_norm(k.view(B, N, self.num_heads, self.head_dim)).transpose(1, 2)
+        v = v.view(B, N, self.num_heads, self.head_dim).transpose(1, 2)
+
+        if self.flash_attention:
+            q = q * self.scale
+            qkv = torch.stack([q, k, v], 0)
+            qkv = qkv.permute(1, 3, 0, 2, 4)
+            x_attn = self.fa(qkv)
+            x_attn = x_attn.permute(0, 2, 1, 3)
+        else:
+            x_attn = F.scaled_dot_product_attention(
+                query=q, key=k, value=v, dropout_p=self.attn_drop_rate
+            )
+
+        x_attn = x_attn.transpose(1, 2).reshape(B, N, C)
+        x_attn = self.attn_out_proj(x_attn)
+
+        # mlp activation, dropout, fc2
+        x_mlp = self.mlp_act(x_mlp)
+        x_mlp = self.mlp_drop(x_mlp)
+        x_mlp = self.mlp_out_proj(x_mlp)
+
+        # layer scaling and drop path, combine parallel layers
+        if self.gamma is not None:
+            y = self.drop_path(self.gamma * (x_attn + x_mlp))
+        else:
+            y = self.drop_path(x_attn + x_mlp)
+
+        # residual
+        x = x + y
+        return x
+                    
+        
 
         
     

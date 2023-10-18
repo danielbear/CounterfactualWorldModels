@@ -312,7 +312,12 @@ class ChannelMaeEncoder(ChannelMaeDecoder):
 
         return (x, mask)
 
-    def forward_features(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    def forward_features(
+            self,
+            x: torch.Tensor,
+            mask: torch.Tensor,
+            bonus_tokens: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
 
         try:
             B, C, H, W = x.shape
@@ -328,16 +333,20 @@ class ChannelMaeEncoder(ChannelMaeDecoder):
 
         x_vis = x[~mask].reshape(B, -1, D)
 
+        if bonus_tokens is not None:
+            assert bonus_tokens.shape[-1] == D
+            x_vis = torch.cat((x_vis, bonus_tokens), dim=1)
+            
         for blk in self.blocks:
             x_vis = blk(x_vis)
 
         x_vis = self.norm(x_vis)
         return x_vis
 
-    def forward(self, x, mask = None, *args, **kwargs):
+    def forward(self, x, mask = None, bonus_tokens = None, *args, **kwargs):
         if mask is None:
             mask = torch.zeros(self.mask_size).view(1, -1).repeat(x.size(0), 1).to(x.device).bool()
-        x = self.forward_features(x, mask)
+        x = self.forward_features(x, mask, bonus_tokens=bonus_tokens)
         x = self.head(x)
         return x
 
@@ -466,7 +475,8 @@ class ChannelMae(nn.Module):
             self,
             x: torch.Tensor,
             mask: torch.Tensor,
-            pos_embed: torch.Tensor
+            pos_embed: torch.Tensor,
+            num_bonus_tokens: int = 0
     ) -> List[torch.Tensor]:
         """
         Apply the channel heads to tokens after the decoder stage.
@@ -489,7 +499,7 @@ class ChannelMae(nn.Module):
         ]
 
         # separate the visible from the masked tokens
-        x_vis, x_masked = torch.split(x, (sum(vis_ns), sum(masked_ns)), dim=1)
+        x_vis, x_bonus, x_masked = torch.split(x, (sum(vis_ns), num_bonus_tokens, sum(masked_ns)), dim=1)
         xs_vis = torch.split(x_vis, vis_ns, dim=1)
         xs_masked = torch.split(x_masked, masked_ns, dim=1)
 
@@ -504,7 +514,7 @@ class ChannelMae(nn.Module):
         return [
             self.channel_heads[group_idx][1](
                 self.channel_heads[group_idx][0](
-                    torch.cat([xs_vis[group_idx], xs_masked[group_idx]], dim=1)
+                    torch.cat([xs_vis[group_idx], x_bonus, xs_masked[group_idx]], dim=1)
                 ),
                 return_token_num=masked_ns[group_idx]
             )            
@@ -515,13 +525,18 @@ class ChannelMae(nn.Module):
         B = x.size(0)
         return self.pos_embed.expand(B, -1, -1).type_as(x).to(x.device).clone().detach()
 
-    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> List[torch.Tensor]:
+    def forward(
+            self,
+            x: torch.Tensor,
+            mask: Optional[torch.Tensor] = None,
+            bonus_tokens: Optional[torch.Tensor] = None
+    ) -> List[torch.Tensor]:
         """Pass in an image tensor, mask it, and get the predicted masked patches for each channel group"""
 
         x = self.preprocess(x)
 
         # encoder runs patch embed, then the encoder blocks on unmasked tokens
-        x_vis = self.encoder(x, mask)
+        x_vis = self.encoder(x, mask, bonus_tokens=bonus_tokens)
         if self.decoder is None:
             return x_vis
 
@@ -538,6 +553,18 @@ class ChannelMae(nn.Module):
         pos_embed_mask = decoder_pos_embed[mask].reshape(B, -1, C)
 
         # create full decoder input, with mask tokens
+        if bonus_tokens is not None:
+            num_bonus_tokens = bonus_tokens.shape[1]
+            pos_embed_vis = torch.cat(
+                (
+                    pos_embed_vis,
+                    torch.zeros(B, num_bonus_tokens, pos_embed_vis.shape[-1]).to(pos_embed_vis)
+                ),
+                dim=1
+            )
+        else:
+            num_bonus_tokens = 0
+            
         x_vis = x_vis + pos_embed_vis
         mask_token_w_pos_emb = self.mask_token + pos_embed_mask
         x_full = torch.cat([x_vis, mask_token_w_pos_emb], dim=1)
@@ -546,7 +573,7 @@ class ChannelMae(nn.Module):
         x = self.decoder(x_full, return_token_num=-1)
 
         # split the decoder output into tokens per channel, then apply output heads
-        ys = self._apply_channel_heads(x, mask, decoder_pos_embed)
+        ys = self._apply_channel_heads(x, mask, decoder_pos_embed, num_bonus_tokens=num_bonus_tokens)
 
         return ys
 
@@ -582,12 +609,13 @@ class ChannelMae(nn.Module):
             x: torch.Tensor,
             mask: torch.Tensor,
             targets: Optional[torch.Tensor] = None,
+            bonus_tokens: Optional[torch.Tensor] = None,
             loss_fn: Optional[Callable] = None
     ) -> torch.Tensor:
         """
         Get the predictions and labels from each channel group, and apply loss_fn. Defaults to MSE
         """
-        group_preds = self.forward(x, mask)
+        group_preds = self.forward(x, mask, bonus_tokens=bonus_tokens)
 
         if targets is None:
             targets = x
@@ -637,7 +665,8 @@ class ChannelMae(nn.Module):
     def predict_image(
             self,
             x: torch.Tensor,
-            mask: torch.Tensor
+            mask: torch.Tensor,
+            bonus_tokens: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """
         Recombine the predictions from each channel group into a single multi-channel image.
@@ -645,7 +674,7 @@ class ChannelMae(nn.Module):
         Input patches that were visible (mask = False) will be equal to the ground truth.
         """
         B = x.shape[0]
-        ys = self.forward(x, mask)
+        ys = self.forward(x, mask, bonus_tokens=bonus_tokens)
 
         mask_groups = torch.split(mask, self.token_channel_group_splits, dim=1)
         group_inds = self.channel_group_start_inds

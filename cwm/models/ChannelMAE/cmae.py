@@ -66,6 +66,7 @@ class ChannelMaeDecoder(nn.Module):
         
         super().__init__()
         self.embed_dim = embed_dim
+        self.num_classes = num_classes
 
         # get funcs by str if necessary. TODO: hydra
         block_func = get_block_func(block_func)
@@ -95,7 +96,7 @@ class ChannelMaeDecoder(nn.Module):
 
         # norm and head layers
         self.norm = norm_layer(self.embed_dim)
-        self.head = nn.Linear(self.embed_dim, self.num_classes) if num_classes > 0 else nn.Identity()
+        self.head = nn.Linear(self.embed_dim, self.num_classes) if self.num_classes > 0 else nn.Identity()
 
         self.apply(self._init_weights)
 

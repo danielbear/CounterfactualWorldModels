@@ -124,20 +124,17 @@ class ChannelMaeDecoder(nn.Module):
         self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
     def get_last_tokens(self, x, return_token_num):
-        print("before norm and head", x.dtype, x.shape)
         if return_token_num > 0:
             x = self.head(self.norm(x[:,-return_token_num:]))
         elif return_token_num == 0:
             x = self.head(self.norm(x))[:,x.size(1):]
         else:
             x = self.head(self.norm(x))
-        print("after norm and head", x.dtype, x.shape)
         return x
 
     def forward(self, x, return_token_num: int = -1):
         for i, blk in enumerate(self.blocks):
             x = blk(x)
-            print(f"after block {i}", x.dtype, x.shape)
 
         return self.get_last_tokens(x, return_token_num)
         
@@ -340,8 +337,8 @@ class ChannelMaeEncoder(ChannelMaeDecoder):
         if bonus_tokens is not None:
             assert bonus_tokens.shape[-1] == D
             x_vis = torch.cat((x_vis, bonus_tokens), dim=1)
-            
-        for blk in self.blocks:
+
+        for i, blk in enumerate(self.blocks):
             x_vis = blk(x_vis)
 
         x_vis = self.norm(x_vis)
@@ -568,9 +565,9 @@ class ChannelMae(nn.Module):
             )
         else:
             num_bonus_tokens = 0
-            
+
         x_vis = x_vis + pos_embed_vis
-        mask_token_w_pos_emb = self.mask_token + pos_embed_mask
+        mask_token_w_pos_emb = self.mask_token.type_as(x_vis) + pos_embed_mask
         x_full = torch.cat([x_vis, mask_token_w_pos_emb], dim=1)
 
         # run the decoder, keeping all the tokens
@@ -623,6 +620,8 @@ class ChannelMae(nn.Module):
 
         if targets is None:
             targets = x
+        if len(group_preds):
+            targets = targets.to(group_preds[0].dtype)
 
         with torch.no_grad():
             group_labels = self.compute_labels(targets, mask)

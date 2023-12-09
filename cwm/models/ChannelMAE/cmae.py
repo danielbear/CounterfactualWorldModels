@@ -124,16 +124,20 @@ class ChannelMaeDecoder(nn.Module):
         self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
     def get_last_tokens(self, x, return_token_num):
+        print("before norm and head", x.dtype, x.shape)
         if return_token_num > 0:
-            return self.head(self.norm(x[:,-return_token_num:]))
+            x = self.head(self.norm(x[:,-return_token_num:]))
         elif return_token_num == 0:
-            return self.head(self.norm(x))[:,x.size(1):]
+            x = self.head(self.norm(x))[:,x.size(1):]
         else:
-            return self.head(self.norm(x))
+            x = self.head(self.norm(x))
+        print("after norm and head", x.dtype, x.shape)
+        return x
 
     def forward(self, x, return_token_num: int = -1):
-        for blk in self.blocks:
+        for i, blk in enumerate(self.blocks):
             x = blk(x)
+            print(f"after block {i}", x.dtype, x.shape)
 
         return self.get_last_tokens(x, return_token_num)
         

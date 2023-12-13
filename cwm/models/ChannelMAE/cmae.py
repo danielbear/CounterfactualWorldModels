@@ -526,7 +526,7 @@ class ChannelMae(nn.Module):
             bonus_ps = torch.zeros((x.shape[0], num_bonus_tokens, self.decoder.embed_dim)).to(x)            
             head_channel_embed = self.head_channel_embed.expand(x.shape[0], -1, -1).type_as(x).to(x.device)
             group_ps = [
-                torch.cat([vis_ps[idx], bonus_ps, masked_ps[idx]], dim=1) + head_channel_embed[idx:idx+1]
+                torch.cat([vis_ps[idx], bonus_ps, masked_ps[idx]], dim=1) + head_channel_embed[:,idx:idx+1]
                 for idx in range(self.num_channel_groups)
             ]
         else:

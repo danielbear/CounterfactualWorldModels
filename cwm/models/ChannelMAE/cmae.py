@@ -359,7 +359,8 @@ class ChannelMae(nn.Module):
             decoder_params: Dict = {},
             head_params: Optional[Dict] = None,
             preprocessor: Optional[Callable] = None,
-            use_flash_attention: bool = False
+            use_flash_attention: bool = False,
+            use_head_channel_embed: bool = False,
     ) -> None:
 
         super().__init__()
@@ -397,6 +398,15 @@ class ChannelMae(nn.Module):
         # mask token and positional embedding
         self._init_mask_token()
         self.pos_embed = get_sinusoid_encoding_table(self.encoder.num_patches, self.decoder.embed_dim)
+
+        # channel embeddings to use at channel head layer
+        if use_head_channel_embed:
+            self.head_channel_embed = nn.Parameter(
+                torch.zeros(1, self.num_channel_groups, self.decoder.embed_dim), requires_grad=True
+            )
+            trunc_normal_(self.head_channel_embed, std=0.02)
+        else:
+            self.head_channel_embed = None
 
         # init weights
         self.apply(self._init_weights)
@@ -489,15 +499,40 @@ class ChannelMae(nn.Module):
         # figure out which tokens belong to which channel group
         ps = torch.split(pos_embed, self.token_channel_group_splits, dim=1)
         ms = torch.split(mask, self.token_channel_group_splits, dim=1)
-        vis_ns = [
-            ps[group_idx][~ms[group_idx]].reshape(B, -1, C).shape[1]
+        # vis_ns = [
+        #     ps[group_idx][~ms[group_idx]].reshape(B, -1, C).shape[1]
+        #     for group_idx in range(self.num_channel_groups)
+        # ]
+
+        # masked_ns = [
+        #     ps[group_idx][ms[group_idx]].reshape(B, -1, C).shape[1]
+        #     for group_idx in range(self.num_channel_groups)
+        # ]
+
+        vis_ps = [
+            ps[group_idx][~ms[group_idx]].reshape(B, -1, C)
             for group_idx in range(self.num_channel_groups)
         ]
 
-        masked_ns = [
-            ps[group_idx][ms[group_idx]].reshape(B, -1, C).shape[1]
+        masked_ps = [
+            ps[group_idx][ms[group_idx]].reshape(B, -1, C)
             for group_idx in range(self.num_channel_groups)
         ]
+
+        vis_ns = [p.shape[1] for p in vis_ps]
+        masked_ns = [p.shape[1] for p in masked_ps]
+
+        if self.head_channel_embed is not None:
+            bonus_ps = torch.zeros((x.shape[0], num_bonus_tokens, self.decoder.embed_dim)).to(x)            
+            head_channel_embed = self.head_channel_embed.expand(x.shape[0], -1, -1).type_as(x).to(x.device)
+            group_ps = [
+                torch.cat([vis_ps[idx], bonus_ps, masked_ps[idx]], dim=1) + head_channel_embed[idx:idx+1]
+                for idx in range(self.num_channel_groups)
+            ]
+        else:
+            group_ps = [
+                torch.zeros((x.shape[0], 1, 1)).to(x) for _ in range(self.num_channel_groups)
+            ]
 
         # separate the visible from the masked tokens
         x_vis, x_bonus, x_masked = torch.split(x, (sum(vis_ns), num_bonus_tokens, sum(masked_ns)), dim=1)
@@ -515,7 +550,11 @@ class ChannelMae(nn.Module):
         return [
             self.channel_heads[group_idx][1](
                 self.channel_heads[group_idx][0](
-                    torch.cat([xs_vis[group_idx], x_bonus, xs_masked[group_idx]], dim=1)
+                    torch.cat(
+                        [
+                            xs_vis[group_idx], x_bonus, xs_masked[group_idx]
+                        ], dim=1
+                    ) + group_ps[group_idx]
                 ),
                 return_token_num=masked_ns[group_idx]
             )            

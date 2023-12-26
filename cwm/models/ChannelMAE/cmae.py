@@ -650,8 +650,9 @@ class ChannelMae(nn.Module):
             mask: torch.Tensor,
             targets: Optional[torch.Tensor] = None,
             bonus_tokens: Optional[torch.Tensor] = None,
-            loss_fn: Optional[Callable] = None
-    ) -> torch.Tensor:
+            loss_fn: Optional[Callable] = None,
+            reduce_mean: bool = True
+    ) -> torch.Tensor | list[torch.Tensor]:
         """
         Get the predictions and labels from each channel group, and apply loss_fn. Defaults to MSE
         """
@@ -670,16 +671,20 @@ class ChannelMae(nn.Module):
             loss_fn = nn.MSELoss(reduction='none')
 
         # skip groups that have no masked tokens
-        loss = torch.tensor(0.0, device=targets.device, dtype=targets.dtype)
+        # loss = torch.tensor(0.0, device=targets.device, dtype=targets.dtype)
+        group_losses = []
         for idx, pred in enumerate(group_preds):
             group_loss = loss_fn(
                 pred,
                 group_labels[idx],
             ) if pred.size(1) > 0 else torch.zeros_like(pred)
             loss_mask = torch.isfinite(group_loss).detach()
-            loss += group_loss[loss_mask].mean()
-            
-        return loss
+            # loss += group_loss[loss_mask].mean()
+            group_losses.append(group_loss[loss_mask])
+
+        if reduce_mean:
+            return sum([loss.mean() for loss in group_losses])
+        return group_losses
 
     def _add_visible_tokens(
             self,

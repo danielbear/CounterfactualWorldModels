@@ -3,6 +3,7 @@ import math
 from typing import Tuple, List, Optional, Union, Callable, Dict
 import torch
 import torch.nn as nn
+from einops import rearrange
 
 from functools import partial
 
@@ -207,7 +208,7 @@ class ChannelMaeEncoder(ChannelMaeDecoder):
             self.channel_partition = (1, ) * self.num_channels
         else:
             assert sum(channel_partition) == self.num_channels
-            self.channel_partition = channel_partition
+            self.channel_partition = list(channel_partition)
 
         # whether to concatenate any channels onto every group
         self.concat_base_channels = concat_base_channels or []
@@ -948,7 +949,7 @@ class SoftChannelMae(ChannelMae):
                 B, self.num_tokens_per_channel_group, self.patch_dim, self.channel_partition[idx]
             ) for idx, y in enumerate(ys)
         ]
-
+        
         return torch.cat(ys, dim=-1).reshape(
             B,
             self.num_tokens_per_channel_group,
@@ -1028,11 +1029,11 @@ class SoftChannelMae(ChannelMae):
 
     def _decode(self, x: torch.Tensor) -> torch.Tensor:
 
-        dec_pos_embed = self.pos_embed.expand.type_as(x).to(x.device).clone().detach()
+        dec_pos_embed = self.pos_embed.expand(x.shape[0], -1, -1).type_as(x).to(x.device).clone().detach()
         if self.decode_mask is not None:
             dec_pos_embed = dec_pos_embed.expand(x.size(0), -1, -1)[self.decode_mask].reshape(*x.shape)
         x = x + dec_pos_embed
-        x = self.decoder(x, mask=mask, filter_to_masked=False)
+        x = self.decoder(x, filter_to_masked=False)
 
         return x
     
@@ -1172,7 +1173,10 @@ class SoftChannelMae(ChannelMae):
             return self.encoder.patchifier.patches_to_video(y_patches)
 
         x_patches = self.patchify(x, squeeze_channel_dim=False)
-        mask = mask.reshape(mask.shape[0], -1, 1, self.num_channel_groups).to(y_patches.dtype)
+        # mask = mask.reshape(mask.shape[0], -1, 1, self.num_channel_groups).to(y_patches.dtype)
+        mask = torch.stack(torch.split(
+            mask, (self.num_tokens_per_channel_group, ) * self.num_channel_groups, dim=-1
+        ), dim=-1).unsqueeze(-2).to(y_patches.dtype)
         
         y = y_patches * mask + x_patches * (1 - mask)
         return self.encoder.patchifier.patches_to_video(y)
